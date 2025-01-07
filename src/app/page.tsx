@@ -1,101 +1,112 @@
-import Image from "next/image";
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import AudioCapture from '@/components/AudioCapture';
+import { getAssistantResponse } from '@/lib/openaiAssistant';
+import { initAvatarSession, speakWithAvatar } from '@/lib/heygenClient';
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [transcript, setTranscript] = useState('');
+  const [avatarReady, setAvatarReady] = useState(false);
+  const [processing, setProcessing] = useState(false);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  useEffect(() => {
+    // Initialize HeyGen avatar when component mounts
+    const setupAvatar = async () => {
+      try {
+        await initAvatarSession({
+          onStreamReady: (stream) => {
+            if (videoRef.current) {
+              videoRef.current.srcObject = stream;
+              videoRef.current.play();
+              setAvatarReady(true);
+            }
+          }
+        });
+      } catch (err) {
+        console.error('Failed to initialize avatar:', err);
+      }
+    };
+
+    setupAvatar();
+  }, []);
+
+  async function handleAudioChunk(blob: Blob) {
+    try {
+      const formData = new FormData();
+      formData.append('audio', blob);
+
+      const response = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: blob
+      });
+
+      const data = await response.json();
+      if (data.transcript) {
+        setTranscript(prev => prev + ' ' + data.transcript);
+      }
+    } catch (err) {
+      console.error('Error processing audio chunk:', err);
+    }
+  }
+
+  async function handleAskQuestion() {
+    if (!transcript.trim() || processing) return;
+
+    setProcessing(true);
+    try {
+      const answer = await getAssistantResponse(transcript);
+      await speakWithAvatar(answer);
+      setTranscript(''); // Clear transcript after processing
+    } catch (err) {
+      console.error('Error processing question:', err);
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  return (
+    <main className="min-h-screen p-8 flex flex-col items-center gap-8">
+      <h1 className="text-3xl font-bold">IBW Virtual Advisor</h1>
+      
+      {/* Avatar Video Feed */}
+      <div className="relative w-full max-w-2xl aspect-video bg-gray-900 rounded-lg overflow-hidden">
+        <video
+          ref={videoRef}
+          className="w-full h-full object-cover"
+          playsInline
+          autoPlay
+          muted
+        />
+        {!avatarReady && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-900/50">
+            <div className="text-white">Initializing Avatar...</div>
+          </div>
+        )}
+      </div>
+
+      {/* Audio Controls & Transcript */}
+      <div className="w-full max-w-2xl space-y-4">
+        <AudioCapture onAudioChunk={handleAudioChunk} />
+        
+        <div className="p-4 bg-gray-50 rounded-lg min-h-[100px]">
+          <h3 className="font-medium mb-2">Transcript:</h3>
+          <p className="text-gray-700">{transcript || 'Start speaking...'}</p>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+
+        <button
+          onClick={handleAskQuestion}
+          disabled={!avatarReady || !transcript.trim() || processing}
+          className={`w-full py-3 px-6 rounded-lg font-medium transition-colors ${
+            !avatarReady || !transcript.trim() || processing
+              ? 'bg-gray-300 cursor-not-allowed'
+              : 'bg-blue-500 hover:bg-blue-600 text-white'
+          }`}
         >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+          {processing ? 'Processing...' : 'Ask Question'}
+        </button>
+      </div>
+    </main>
   );
 }
