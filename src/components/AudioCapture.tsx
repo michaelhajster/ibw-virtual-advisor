@@ -8,33 +8,90 @@ export default function AudioCapture({ onAudioChunk }: AudioCaptureProps) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState<string>('');
+  const chunksRef = useRef<Blob[]>([]);
 
   async function startRecording() {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorderRef.current = new MediaRecorder(stream, { 
-        mimeType: 'audio/webm' 
+      // Reset state
+      chunksRef.current = [];
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 16000, // Whisper preferred sample rate
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      });
+      console.log('🎤 [AudioCapture] Got media stream');
+
+      // Use WebM with Opus codec for Whisper compatibility
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm';
+
+      console.log('🎵 [AudioCapture] Using MIME type:', mimeType);
+
+      mediaRecorderRef.current = new MediaRecorder(stream, {
+        mimeType,
+        audioBitsPerSecond: 128000
       });
 
+      // Collect chunks
       mediaRecorderRef.current.ondataavailable = (event) => {
         if (event.data.size > 0) {
-          onAudioChunk(event.data);
+          chunksRef.current.push(event.data);
+          console.log('📦 [AudioCapture] Chunk collected:', {
+            size: event.data.size,
+            type: event.data.type,
+            totalChunks: chunksRef.current.length
+          });
         }
       };
 
-      mediaRecorderRef.current.start(1000); // Chunk every 1 second
+      mediaRecorderRef.current.onstart = () => {
+        console.log('▶️ [AudioCapture] Recording started');
+      };
+
+      mediaRecorderRef.current.onstop = () => {
+        console.log('⏹️ [AudioCapture] Recording stopped');
+        
+        // Combine all chunks and send
+        if (chunksRef.current.length > 0) {
+          const finalBlob = new Blob(chunksRef.current, { type: mimeType });
+          console.log('📼 [AudioCapture] Final audio blob:', {
+            size: finalBlob.size,
+            type: finalBlob.type,
+            chunks: chunksRef.current.length
+          });
+          onAudioChunk(finalBlob);
+        }
+      };
+
+      mediaRecorderRef.current.onerror = (err) => {
+        console.error('❌ [AudioCapture] MediaRecorder error:', err);
+        setError('Recording error occurred');
+      };
+
+      // Start recording
+      mediaRecorderRef.current.start();
       setIsRecording(true);
       setError('');
+
     } catch (err) {
-      setError('Failed to access microphone. Please ensure you have granted permission.');
-      console.error('Error accessing microphone:', err);
+      console.error('❌ [AudioCapture] Setup error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to start recording');
     }
   }
 
   function stopRecording() {
     if (mediaRecorderRef.current && isRecording) {
+      console.log('🛑 [AudioCapture] Stopping recording...');
       mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      mediaRecorderRef.current.stream.getTracks().forEach(track => {
+        track.stop();
+        console.log('🎵 [AudioCapture] Track stopped:', track.kind);
+      });
       setIsRecording(false);
     }
   }

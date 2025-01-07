@@ -1,111 +1,189 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import AudioCapture from '@/components/AudioCapture';
-import { getAssistantResponse } from '@/lib/openaiAssistant';
 import { initAvatarSession, speakWithAvatar } from '@/lib/heygenClient';
+import type StreamingAvatar from '@heygen/streaming-avatar';
 
 export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [transcript, setTranscript] = useState('');
-  const [avatarReady, setAvatarReady] = useState(false);
-  const [processing, setProcessing] = useState(false);
+  const avatarRef = useRef<StreamingAvatar | null>(null);
+  const [isAvatarReady, setAvatarReady] = useState(false);
+  const [transcript, setTranscript] = useState<string>('');
+  const [error, setError] = useState<string>('');
+  const [isProcessing, setIsProcessing] = useState(false);
 
+  // Helper function to wait for avatar to be ready
+  async function waitForAvatar(timeoutMs = 15000): Promise<StreamingAvatar> {
+    const startTime = Date.now();
+    console.log('🔄 [Page] Checking avatar readiness...');
+    
+    while (Date.now() - startTime < timeoutMs) {
+      if (avatarRef.current && isAvatarReady) {
+        console.log('✅ [Page] Avatar is ready');
+        return avatarRef.current;
+      }
+      console.log('⏳ [Page] Avatar not ready, waiting... Current state:', {
+        hasAvatar: !!avatarRef.current,
+        isReady: isAvatarReady
+      });
+      await new Promise(resolve => setTimeout(resolve, 500)); // Wait longer between checks
+    }
+    throw new Error('Avatar initialization timed out. Please refresh the page and try again.');
+  }
+
+  // Initialize avatar with token when the page loads
   useEffect(() => {
-    // Initialize HeyGen avatar when component mounts
-    const setupAvatar = async () => {
+    async function getTokenAndInit() {
       try {
-        await initAvatarSession({
+        setError(''); // Clear any previous errors
+        console.log('🔑 [Page] Fetching HeyGen token...');
+        const res = await fetch('/api/heygen/token', { method: 'POST' });
+        const json = await res.json();
+
+        if (!json.token) {
+          throw new Error('No token received from server');
+        }
+        console.log('🎭 [Page] Initializing avatar with token...');
+
+        // Start the avatar session
+        const avatar = await initAvatarSession({
+          token: json.token,
           onStreamReady: (stream) => {
             if (videoRef.current) {
               videoRef.current.srcObject = stream;
-              videoRef.current.play();
+              videoRef.current.play().catch(console.error);
               setAvatarReady(true);
+              console.log('✨ [Page] Avatar stream ready');
             }
-          }
+          },
         });
+        avatarRef.current = avatar;
+        console.log('🚀 [Page] Avatar initialized successfully');
       } catch (err) {
-        console.error('Failed to initialize avatar:', err);
+        console.error('💥 [Page] Avatar initialization error:', err);
+        setError(
+          err instanceof Error ? err.message : 'Failed to initialize avatar'
+        );
+        // Reset states on error
+        setAvatarReady(false);
+        avatarRef.current = null;
+      }
+    }
+    getTokenAndInit();
+
+    // Cleanup function
+    return () => {
+      if (avatarRef.current) {
+        console.log('🧹 [Page] Cleaning up avatar...');
+        setAvatarReady(false);
+        avatarRef.current = null;
       }
     };
-
-    setupAvatar();
   }, []);
 
+  /**
+   * Called whenever we have a final audio blob from the user's recording.
+   * We will transcribe, then call GPT, then speak GPT's result automatically.
+   */
   async function handleAudioChunk(blob: Blob) {
-    try {
-      const formData = new FormData();
-      formData.append('audio', blob);
+    if (isProcessing) {
+      console.log('🚫 [Page] Already processing, skipping new audio chunk');
+      return;
+    }
 
-      const response = await fetch('/api/transcribe', {
-        method: 'POST',
-        body: blob
+    setIsProcessing(true);
+    try {
+      console.log('🎤 [Page] Got audio chunk:', {
+        size: blob.size,
+        type: blob.type,
       });
 
-      const data = await response.json();
-      if (data.transcript) {
-        setTranscript(prev => prev + ' ' + data.transcript);
+      // 1) Send audio to /api/transcribe
+      const response = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: blob,
+      });
+      if (!response.ok) {
+        throw new Error(`Transcription failed: ${await response.text()}`);
       }
-    } catch (err) {
-      console.error('Error processing audio chunk:', err);
-    }
-  }
+      const { transcript } = await response.json();
+      console.log('📝 [Page] Got transcript:', transcript);
+      setTranscript(transcript);
 
-  async function handleAskQuestion() {
-    if (!transcript.trim() || processing) return;
+      // 2) Wait for avatar to be ready (with timeout)
+      console.log('🔄 [Page] Waiting for avatar to be ready...');
+      const avatar = await waitForAvatar();
+      
+      // 3) Get GPT's answer
+      console.log('🤖 [Page] Getting GPT response...');
+      const gptResponse = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ transcript }),
+      });
 
-    setProcessing(true);
-    try {
-      const answer = await getAssistantResponse(transcript);
-      await speakWithAvatar(answer);
-      setTranscript(''); // Clear transcript after processing
+      if (!gptResponse.ok) {
+        throw new Error(`GPT request failed: ${await gptResponse.text()}`);
+      }
+
+      const { response: gptAnswer } = await gptResponse.json();
+      console.log('✨ [Page] GPT answer:', gptAnswer);
+
+      // 4) Make avatar speak GPT's answer
+      console.log('🗣️ [Page] Making avatar speak...');
+      await speakWithAvatar(avatar, gptAnswer);
+      console.log('✅ [Page] Avatar spoke GPT answer');
+
     } catch (err) {
-      console.error('Error processing question:', err);
+      console.error('❌ [Page] Error in handleAudioChunk:', err);
+      setError(err instanceof Error ? err.message : 'Unknown error occurred');
     } finally {
-      setProcessing(false);
+      setIsProcessing(false);
     }
   }
 
   return (
-    <main className="min-h-screen p-8 flex flex-col items-center gap-8">
-      <h1 className="text-3xl font-bold">IBW Virtual Advisor</h1>
-      
-      {/* Avatar Video Feed */}
-      <div className="relative w-full max-w-2xl aspect-video bg-gray-900 rounded-lg overflow-hidden">
-        <video
-          ref={videoRef}
-          className="w-full h-full object-cover"
-          playsInline
-          autoPlay
-          muted
-        />
-        {!avatarReady && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-900/50">
-            <div className="text-white">Initializing Avatar...</div>
-          </div>
-        )}
-      </div>
-
-      {/* Audio Controls & Transcript */}
+    <main className="flex min-h-screen flex-col items-center p-8">
       <div className="w-full max-w-2xl space-y-4">
-        <AudioCapture onAudioChunk={handleAudioChunk} />
-        
-        <div className="p-4 bg-gray-50 rounded-lg min-h-[100px]">
-          <h3 className="font-medium mb-2">Transcript:</h3>
-          <p className="text-gray-700">{transcript || 'Start speaking...'}</p>
+        {/* Avatar Video Feed */}
+        <div className="relative aspect-video bg-gray-900 rounded">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            className="w-full h-full object-cover"
+          />
+          {!isAvatarReady && (
+            <div className="absolute inset-0 flex items-center justify-center text-white">
+              <div className="flex flex-col items-center gap-2">
+                <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500" />
+                <p>Loading avatar...</p>
+              </div>
+            </div>
+          )}
         </div>
 
-        <button
-          onClick={handleAskQuestion}
-          disabled={!avatarReady || !transcript.trim() || processing}
-          className={`w-full py-3 px-6 rounded-lg font-medium transition-colors ${
-            !avatarReady || !transcript.trim() || processing
-              ? 'bg-gray-300 cursor-not-allowed'
-              : 'bg-blue-500 hover:bg-blue-600 text-white'
-          }`}
-        >
-          {processing ? 'Processing...' : 'Ask Question'}
-        </button>
+        {/* Audio Capture + Errors */}
+        <AudioCapture onAudioChunk={handleAudioChunk} />
+        {error && <div className="text-red-500 text-sm">{error}</div>}
+
+        {/* Processing State */}
+        {isProcessing && (
+          <div className="text-blue-500 text-sm animate-pulse">
+            Processing your request...
+          </div>
+        )}
+
+        {/* Show final transcript */}
+        {transcript && (
+          <div className="p-4 bg-gray-100 rounded">
+            <h3 className="font-semibold">Last Transcript:</h3>
+            <p>{transcript}</p>
+          </div>
+        )}
       </div>
     </main>
   );

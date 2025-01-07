@@ -4,95 +4,84 @@ import StreamingAvatar, {
   TaskType
 } from '@heygen/streaming-avatar';
 
-let avatar: StreamingAvatar | null = null;
-
 interface InitAvatarOptions {
-  token?: string;
+  token: string;  // must pass a "hey_sk_..." token from the client
   avatarId?: string;
   onStreamReady?: (stream: MediaStream) => void;
 }
 
-function validateHeyGenToken(token: string | undefined): string {
-  if (!token) {
-    throw new Error(
-      'No HeyGen API key found. Please:\n' +
-      '1. Go to https://labs.heygen.com/streaming\n' +
-      '2. Generate a Streaming Access Token\n' +
-      '3. Add it to .env.local as NEXT_PUBLIC_HEYGEN_API_KEY\n' +
-      'Note: The token should look like "hey_sk_..." not a Base64 string.'
-    );
-  }
-
-  // Basic validation that it's a streaming token
-  if (token.startsWith('NDNk')) {
-    throw new Error(
-      'Invalid HeyGen token format. You provided a Base64 token, but streaming requires a different format.\n' +
-      'Please get a Streaming Access Token from https://labs.heygen.com/streaming\n' +
-      'It should start with "hey_sk_..."'
-    );
-  }
-
-  return token;
-}
-
-export async function initAvatarSession(options: InitAvatarOptions = {}) {
-  const {
-    // For streaming avatar, we need the client-side token
-    token = typeof window !== 'undefined' 
-      ? process.env.NEXT_PUBLIC_HEYGEN_API_KEY 
-      : undefined,
+export async function initAvatarSession(options: InitAvatarOptions) {
+  const { 
+    token, 
     avatarId = '73c84e2b886940099c5793b085150f2f',
-    onStreamReady
+    onStreamReady 
   } = options;
 
+  console.log('🎭 [HeyGen] Initializing avatar session with token:', token.slice(0, 10) + '...');
+  
   try {
-    const validToken = validateHeyGenToken(token);
-    
-    avatar = new StreamingAvatar({ token: validToken });
+    // Initialize with just the token
+    const avatar = new StreamingAvatar({ token });
 
+    // Add event listeners
     avatar.on(StreamingEvents.STREAM_READY, (evt: CustomEvent) => {
-      console.log('HeyGen stream is ready');
-      if (onStreamReady && evt.detail?.stream) {
-        onStreamReady(evt.detail.stream);
-      }
+      console.log('✨ [HeyGen] Stream ready, event details:', evt.detail);
+      const stream = evt.detail as MediaStream;
+      onStreamReady?.(stream);
     });
 
-    avatar.on(StreamingEvents.STREAM_DISCONNECTED, () => {
-      console.log('HeyGen stream disconnected');
+    avatar.on('error', (error: any) => {
+      console.error('❌ [HeyGen] Avatar error:', {
+        message: error.message,
+        code: error.code,
+        status: error.status,
+        details: error.details,
+        raw: error
+      });
+      throw error;
     });
 
+    // Initialize the avatar with minimal config
+    console.log('🚀 [HeyGen] Starting avatar...');
     await avatar.createStartAvatar({
       avatarName: avatarId,
       quality: AvatarQuality.Medium,
-      language: 'English',
     });
+    
+    console.log('✅ [HeyGen] Avatar initialized successfully');
+    return avatar;
 
-    console.log('Avatar session started successfully');
-  } catch (err) {
-    const error = err instanceof Error ? err : new Error('Failed to initialize HeyGen avatar');
-    console.error(error.message);
+  } catch (error: any) {
+    // Log the full error object for debugging
+    console.error('💥 [HeyGen] Failed to initialize avatar:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      status: error.status,
+      details: error.details,
+      stack: error.stack
+    });
     throw error;
   }
 }
 
-export async function speakWithAvatar(text: string) {
-  if (!avatar) {
-    throw new Error(
-      'Avatar session not initialized. Please ensure:\n' +
-      '1. You have called initAvatarSession\n' +
-      '2. You have a valid streaming token\n' +
-      '3. The initialization was successful'
-    );
-  }
-
+export async function speakWithAvatar(avatar: StreamingAvatar, text: string) {
   try {
+    console.log('🗣️ [HeyGen] Speaking:', text);
     await avatar.speak({
       text,
       taskType: TaskType.REPEAT,
     });
-  } catch (err) {
-    const error = err instanceof Error ? err : new Error('Failed to make avatar speak');
-    console.error(error.message);
+    console.log('✅ [HeyGen] Speech completed');
+  } catch (error: any) {
+    console.error('❌ [HeyGen] Speech error:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      status: error.status,
+      details: error.details,
+      stack: error.stack
+    });
     throw error;
   }
 } 
