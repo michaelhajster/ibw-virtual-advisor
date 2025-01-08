@@ -6,10 +6,12 @@ interface InitAvatarOptions {
   onStreamReady?: (stream: MediaStream) => void;
 }
 
-export async function initAvatarSession(options: InitAvatarOptions) {
+const API_BASE = 'https://api.heygen.com/v1';
+
+export async function initAvatarSession(options: InitAvatarOptions): Promise<{ room: Room; ws: WebSocket }> {
   const { 
     token, 
-    avatarId = 'Santa_Fireplace_Front_public',  // Using their default avatar
+    avatarId = 'lisa',  
     onStreamReady 
   } = options;
 
@@ -18,22 +20,34 @@ export async function initAvatarSession(options: InitAvatarOptions) {
   try {
     // Create new streaming session
     console.log(' [HeyGen] Creating streaming session...');
-    const response = await fetch('https://api.heygen.com/v1/streaming.new', {
+    const response = await fetch(`${API_BASE}/streaming.new`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
       },
       body: JSON.stringify({
-        version: 'v2',
-        quality: 'high',
+        version: 'v1',
+        quality: 'standard',
         avatar_name: avatarId,
-        video_encoding: 'VP8',
+        video_encoding: 'h264',
         voice: {
           rate: 1,
         },
       }),
     });
+
+    if (!response.ok) {
+      const error = await response.json();
+      console.error(' [HeyGen] Session creation failed:', error);
+      
+      // Special handling for server busy error
+      if (error.code === 400007) {
+        throw new Error('HeyGen servers are currently busy. Please wait a few minutes and try again.');
+      }
+      
+      throw new Error(`Failed to create streaming session: ${response.status} \nResponse: ${JSON.stringify(error)}`);
+    }
 
     const responseText = await response.text();
     console.log(' [HeyGen] Streaming session response:', {
@@ -41,10 +55,6 @@ export async function initAvatarSession(options: InitAvatarOptions) {
       statusText: response.statusText,
       body: responseText
     });
-
-    if (!response.ok) {
-      throw new Error(`Failed to create streaming session: ${response.status} ${response.statusText}\nResponse: ${responseText}`);
-    }
 
     let data;
     try {

@@ -128,11 +128,51 @@ export default function Home() {
       // Get avatar ready
       const { ws } = await waitForAvatar();
 
-      // TODO: Transcribe audio and get GPT response
-      const text = 'Hello, how can I help you today?';
+      // 1. Transcribe audio
+      console.log('🎯 [Page] Transcribing audio...');
+      const transcribeRes = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: blob
+      });
+      
+      if (!transcribeRes.ok) {
+        throw new Error(`Transcription failed: ${transcribeRes.status}`);
+      }
+      
+      const transcribeData = await transcribeRes.json();
+      if (transcribeData.error) {
+        throw new Error(`Transcription error: ${transcribeData.error}`);
+      }
+      
+      const userText = transcribeData.transcript;
+      console.log('📝 [Page] Transcription:', userText);
 
-      // Speak the response
-      await speakWithAvatar(ws, text);
+      // 2. Get GPT response
+      console.log('🤖 [Page] Getting GPT response...');
+      const chatRes = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript: userText })
+      });
+
+      if (!chatRes.ok) {
+        throw new Error(`Chat failed: ${chatRes.status}`);
+      }
+
+      const chatData = await chatRes.json();
+      if (chatData.error) {
+        throw new Error(`Chat error: ${chatData.error}`);
+      }
+
+      const response = chatData.response;
+      console.log('💬 [Page] GPT response:', response);
+
+      // 3. Make avatar speak
+      console.log('🎭 [Page] Making avatar speak...');
+      await speakWithAvatar(ws, response);
+
+      // 4. Update transcript
+      setTranscript(prev => `${prev}\nYou: ${userText}\nAvatar: ${response}`);
 
     } catch (err) {
       console.error('❌ [Page] Error processing audio:', err);
@@ -170,7 +210,10 @@ export default function Home() {
           <div className="mb-4 p-4 bg-red-50 text-red-700 rounded-lg">
             <p className="mb-2">{error}</p>
             <button
-              onClick={initializeAvatar}
+              onClick={() => {
+                setError('');
+                initializeAvatar();
+              }}
               disabled={isInitializing}
               className={`px-4 py-2 rounded bg-red-600 text-white ${
                 isInitializing ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-700'
@@ -178,12 +221,25 @@ export default function Home() {
             >
               {isInitializing ? 'Retrying...' : 'Retry Now'}
             </button>
+            <p className="mt-2 text-sm text-red-600">
+              {error.includes('servers are busy') ? 
+                'Tip: This error usually resolves within a few minutes. Please try again shortly.' : 
+                'If this error persists, please check your connection and try again.'}
+            </p>
           </div>
         )}
 
-        {/* Audio capture */}
+        {/* Audio capture - Allow recording even if avatar isn't ready */}
         <div className="mt-4">
-          <AudioCapture onAudioReady={handleAudioChunk} disabled={!isAvatarReady || isProcessing} />
+          <AudioCapture 
+            onAudioChunk={handleAudioChunk} 
+            disabled={isProcessing} 
+          />
+          {!isAvatarReady && !error && (
+            <p className="mt-2 text-sm text-gray-600">
+              Note: Avatar is still initializing. Recording will be available once ready.
+            </p>
+          )}
         </div>
 
         {/* Transcript display */}

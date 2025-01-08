@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 
 interface AudioCaptureProps {
   onAudioChunk: (blob: Blob) => void;
+  disabled?: boolean;
 }
 
-export default function AudioCapture({ onAudioChunk }: AudioCaptureProps) {
+export default function AudioCapture({ onAudioChunk, disabled }: AudioCaptureProps) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState<string>('');
@@ -96,28 +97,38 @@ export default function AudioCapture({ onAudioChunk }: AudioCaptureProps) {
     }
   }
 
+  // Cleanup effect
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current?.state === 'recording') {
+        console.log('🧹 [AudioCapture] Stopping recording on cleanup');
+        mediaRecorderRef.current.stop();
+      }
+      
+      // Clean up media stream tracks
+      if (mediaRecorderRef.current?.stream) {
+        console.log('🧹 [AudioCapture] Cleaning up media stream tracks');
+        mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
+
   return (
     <div className="flex flex-col items-center gap-4">
       <button
         onClick={isRecording ? stopRecording : startRecording}
-        className={`px-6 py-2 rounded-lg font-medium transition-colors ${
+        disabled={!!error || disabled}
+        className={`px-6 py-3 rounded-full font-semibold text-white transition-colors ${
           isRecording 
-            ? 'bg-red-500 hover:bg-red-600 text-white' 
-            : 'bg-blue-500 hover:bg-blue-600 text-white'
-        }`}
+            ? 'bg-red-500 hover:bg-red-600' 
+            : 'bg-blue-500 hover:bg-blue-600'
+        } disabled:opacity-50 disabled:cursor-not-allowed`}
       >
         {isRecording ? 'Stop Recording' : 'Start Recording'}
       </button>
-      
+
       {error && (
         <p className="text-red-500 text-sm">{error}</p>
-      )}
-      
-      {isRecording && (
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse" />
-          <span className="text-sm text-gray-600">Recording...</span>
-        </div>
       )}
     </div>
   );
