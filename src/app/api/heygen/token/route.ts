@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Buffer } from 'buffer';
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,7 +21,7 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
         'x-api-key': apiKey
       },
-      body: JSON.stringify({})
+      body: JSON.stringify({})  // per docs, empty object is fine
     });
 
     if (!heygenRes.ok) {
@@ -32,21 +33,45 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 3. Parse JSON => Typically { code:0, msg:'ok', data:{ token:'<base64>' } }
     const { data } = await heygenRes.json();
     console.log('✨ HeyGen response:', data);
 
-    // Validate the token format
-    if (!data?.token || !data.token.startsWith('hey_sk_')) {
-      console.error('Invalid token format from HeyGen:', data);
+    if (!data?.token) {
+      console.error('No "token" found in HeyGen response', data);
       return NextResponse.json(
-        { error: `HeyGen did not return a valid streaming token. Response: ${JSON.stringify(data)}` },
+        { error: 'No "token" field found in HeyGen response' },
         { status: 500 }
       );
     }
 
-    // 3. Return the streaming token to the client
-    console.log('🎉 Got valid streaming token:', data.token.slice(0, 10) + '...');
-    return NextResponse.json({ token: data.token });
+    // 4. The token is base64-encoded JSON. Let's decode it and parse
+    //    Example decode => { "token":"hey_sk_ABC123", "token_type":"..." }
+    const base64 = data.token;
+    const decodedString = Buffer.from(base64, 'base64').toString('utf-8');
+    let parsed;
+    try {
+      parsed = JSON.parse(decodedString);
+    } catch (err) {
+      console.error('Invalid JSON after base64 decoding:', decodedString);
+      return NextResponse.json(
+        { error: 'Invalid JSON after base64 decoding' },
+        { status: 500 }
+      );
+    }
+
+    // 5. Check that parsed.token starts with "hey_sk_"
+    if (!parsed?.token || !parsed.token.startsWith('hey_sk_')) {
+      console.error('Decoded token does not start with "hey_sk_":', parsed);
+      return NextResponse.json(
+        { error: 'Decoded token is not a valid "hey_sk_" token.' },
+        { status: 500 }
+      );
+    }
+
+    // 6. Return the actual "hey_sk_..." token to the client
+    console.log('🎉 Got valid streaming token:', parsed.token.slice(0, 10) + '...');
+    return NextResponse.json({ token: parsed.token });
 
   } catch (err: any) {
     console.error('Error in HeyGen token route:', err);
@@ -55,4 +80,4 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
-} 
+}
