@@ -5,13 +5,13 @@ import AudioCapture from '@/components/AudioCapture';
 import { startAvatarSession, onStream, speakText, stopAvatarSession } from '@/lib/avatarClient';
 
 export default function Home() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  const [isAvatarReady, setAvatarReady] = useState(false);
-  const [error, setError] = useState('');
   const [isInitializing, setIsInitializing] = useState(false);
-  const [transcript, setTranscript] = useState('');
+  const [avatarReady, setAvatarReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [hasUserInteracted, setHasUserInteracted] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   // Fetch the base64 token from our /api/heygen/token route
   async function fetchHeyGenToken() {
@@ -58,21 +58,19 @@ export default function Home() {
     }
   }
 
-  // Cleanup on unmount
+  // Modified useEffect to depend on hasUserInteracted
   useEffect(() => {
-    initializeAvatar();
+    if (hasUserInteracted) {
+      initializeAvatar();
+    }
     return () => {
       stopAvatarSession().catch(console.error);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hasUserInteracted]);
 
   // Called when user finishes audio
-  async function handleAudioChunk(blob: Blob) {
-    if (isProcessing) {
-      console.log('[Page] busy, skip...');
-      return;
-    }
+  const handleAudioChunk = async (audioBlob: Blob) => {
+    if (!avatarReady || isProcessing) return;
     setIsProcessing(true);
 
     try {
@@ -80,7 +78,7 @@ export default function Home() {
       console.log('[Page] Transcribing...');
       const transRes = await fetch('/api/transcribe', {
         method: 'POST',
-        body: blob,
+        body: audioBlob,
       });
       if (!transRes.ok) throw new Error(`/api/transcribe error: ${transRes.status}`);
       const transData = await transRes.json();
@@ -109,52 +107,41 @@ export default function Home() {
 
       // 4) Update transcript
       setTranscript((prev) => prev + `\nYou: ${userText}\nAvatar: ${gptAnswer}`);
-    } catch (err: any) {
-      console.error('[Page] handleAudioChunk error:', err);
-      setError(err.message || 'Audio processing error');
+    } catch (err) {
+      console.error('Error processing audio:', err);
+      setError(err instanceof Error ? err.message : 'Failed to process audio');
     } finally {
       setIsProcessing(false);
     }
-  }
+  };
 
   return (
-    <main className="p-6 flex flex-col gap-4">
-      <h1 className="text-2xl font-bold">IBW Virtual Advisor</h1>
-
-      <div className="relative w-full max-w-md aspect-video bg-black">
-        <video
-          ref={videoRef}
-          className="absolute inset-0 w-full h-full object-contain"
-          autoPlay
-          playsInline
-        />
-        {!isAvatarReady && !error && (
-          <div className="absolute inset-0 flex items-center justify-center text-white">
-            <p>Initializing avatar...</p>
+    <main className="flex min-h-screen flex-col items-center justify-between p-24">
+      {!hasUserInteracted ? (
+        <button
+          onClick={() => setHasUserInteracted(true)}
+          className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+        >
+          Start Conversation
+        </button>
+      ) : (
+        <>
+          <div className="relative">
+            {isInitializing && <div>Initializing avatar...</div>}
+            {error && <div className="text-red-500">{error}</div>}
+            <video
+              ref={videoRef}
+              style={{ width: '100%', maxWidth: '800px' }}
+              playsInline
+            />
           </div>
-        )}
-      </div>
-
-      {error && (
-        <div className="bg-red-50 text-red-700 p-3 rounded">
-          <p>{error}</p>
-          {!isInitializing && (
-            <button
-              onClick={initializeAvatar}
-              className="mt-2 px-4 py-2 bg-red-600 text-white rounded"
-            >
-              Retry
-            </button>
+          {avatarReady && <AudioCapture onAudioChunk={handleAudioChunk} disabled={isProcessing} />}
+          {transcript && (
+            <div className="mt-4 p-4 bg-gray-100 rounded-lg">
+              <p>{transcript}</p>
+            </div>
           )}
-        </div>
-      )}
-
-      <AudioCapture onAudioChunk={handleAudioChunk} disabled={!isAvatarReady || isProcessing} />
-
-      {transcript && (
-        <div className="w-full max-w-md bg-gray-50 p-4 mt-3 rounded">
-          <pre className="whitespace-pre-wrap">{transcript}</pre>
-        </div>
+        </>
       )}
     </main>
   );
