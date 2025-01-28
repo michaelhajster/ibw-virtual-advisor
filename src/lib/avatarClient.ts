@@ -2,6 +2,10 @@ import StreamingAvatar from '@heygen/streaming-avatar';
 import { TaskType, StreamingEvents, AvatarQuality } from '@heygen/streaming-avatar';
 
 let avatar: StreamingAvatar | null = null;
+let currentSentence = '';
+let speakingPromise: Promise<void> | null = null;
+let processingStartTime: number | null = null;
+let sentenceCount = 0;
 
 /**
  * Initialize a new avatar session using the official HeyGen Streaming Avatar SDK.
@@ -40,12 +44,78 @@ export async function startAvatarSession(token: string): Promise<void> {
  * We'll re-emit the STREAM_READY event for the callback.
  */
 export function onStream(callback: (stream: MediaStream) => void) {
-  if (!avatar) return;
+  if (!avatar) {
+    console.log('[AvatarSDK] onStream called but no avatar exists');
+    return;
+  }
 
+  console.log('[AvatarSDK] Setting up stream listener...');
   avatar.on(StreamingEvents.STREAM_READY, (evt: CustomEvent) => {
+    console.log('[AvatarSDK] Got STREAM_READY event:', evt);
     const mediaStream = evt.detail as MediaStream;
+    console.log('[AvatarSDK] MediaStream details:', {
+      active: mediaStream.active,
+      id: mediaStream.id,
+      tracks: mediaStream.getTracks().map(t => ({
+        kind: t.kind,
+        enabled: t.enabled,
+        muted: t.muted,
+        readyState: t.readyState
+      }))
+    });
     callback(mediaStream);
   });
+}
+
+/**
+ * Process a chunk of streamed text and make the avatar speak complete sentences.
+ */
+export async function processStreamedText(chunk: string) {
+  if (!avatar) {
+    console.warn('[AvatarSDK] processStreamedText called but no avatar session exists');
+    return;
+  }
+
+  // Initialize timer on first chunk
+  if (!processingStartTime) {
+    processingStartTime = Date.now();
+    console.log('\n🎭 ===== AVATAR TIMING LOG =====');
+    console.log('⏱️ [0ms] Starting to process first chunk');
+  }
+
+  currentSentence += chunk;
+  
+  // Look for sentence boundaries (. ! ?)
+  const sentenceEndRegex = /[.!?]\s+/g;
+  let match;
+  let lastIndex = 0;
+
+  while ((match = sentenceEndRegex.exec(currentSentence)) !== null) {
+    const sentence = currentSentence.slice(lastIndex, match.index + 1).trim();
+    lastIndex = match.index + match[0].length;
+    sentenceCount++;
+
+    // Wait for any previous speaking to finish
+    if (speakingPromise) {
+      await speakingPromise;
+    }
+
+    // Speak the complete sentence
+    const timeSinceStart = Date.now() - processingStartTime;
+    console.log(`⏱️ [${timeSinceStart}ms] Speaking sentence #${sentenceCount}: "${sentence}"`);
+    
+    speakingPromise = avatar.speak({
+      text: sentence,
+      taskType: TaskType.REPEAT,
+    }).then(() => {
+      if (processingStartTime) {
+        console.log(`⏱️ [${Date.now() - processingStartTime}ms] Finished speaking sentence #${sentenceCount}`);
+      }
+    });
+  }
+
+  // Keep any remaining incomplete sentence
+  currentSentence = currentSentence.slice(lastIndex);
 }
 
 /**
@@ -58,11 +128,18 @@ export async function speakText(text: string) {
   }
   console.log('[AvatarSDK] speak with text:', text);
 
+  // Wait for any previous speaking to finish
+  if (speakingPromise) {
+    await speakingPromise;
+  }
+
   // 'repeat' => reads your text verbatim
-  await avatar.speak({
+  speakingPromise = avatar.speak({
     text,
     taskType: TaskType.REPEAT,
   });
+
+  await speakingPromise;
 }
 
 /**
@@ -71,6 +148,21 @@ export async function speakText(text: string) {
 export async function stopAvatarSession() {
   if (!avatar) return;
   console.log('[AvatarSDK] Stopping avatar session...');
+  
+  // Wait for any speaking to finish
+  if (speakingPromise) {
+    await speakingPromise;
+  }
+  
+  if (processingStartTime) {
+    console.log(`⏱️ [${Date.now() - processingStartTime}ms] Session ended (${sentenceCount} sentences spoken)`);
+    console.log('🎭 ================================\n');
+  }
+  
   await avatar.stopAvatar();
   avatar = null;
+  currentSentence = '';
+  speakingPromise = null;
+  processingStartTime = null;
+  sentenceCount = 0;
 }

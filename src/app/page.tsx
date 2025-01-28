@@ -2,9 +2,19 @@
 
 import { useEffect, useRef, useState } from 'react';
 import AudioCapture from '@/components/AudioCapture';
-import { startAvatarSession, onStream, speakText, stopAvatarSession } from '@/lib/avatarClient';
+import { startAvatarSession, onStream, speakText, stopAvatarSession, processStreamedText } from '@/lib/avatarClient';
+
+// Add global error handler
+if (typeof window !== 'undefined') {
+  window.onerror = function(msg, url, lineNo, columnNo, error) {
+    console.error('Global error:', { msg, url, lineNo, columnNo, error });
+    return false;
+  };
+}
 
 export default function Home() {
+  console.log('[Page] Component mounted'); // Add this line to verify component mounting
+
   const [isInitializing, setIsInitializing] = useState(false);
   const [avatarReady, setAvatarReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -15,10 +25,25 @@ export default function Home() {
 
   // Fetch the base64 token from our /api/heygen/token route
   async function fetchHeyGenToken() {
-    const res = await fetch('/api/heygen/token');
-    const data = await res.json();
-    if (!data.token) throw new Error('No token from /api/heygen/token');
-    return data.token;
+    try {
+      console.log('[Page] Fetching HeyGen token...');
+      const res = await fetch('/api/heygen/token');
+      const data = await res.json();
+      
+      if (data.error) {
+        throw new Error(`Token API error: ${data.error}`);
+      }
+      
+      if (!data.token) {
+        throw new Error('No token from /api/heygen/token');
+      }
+      
+      console.log('[Page] Got heygen token:', data.token.slice(0, 10) + '...');
+      return data.token;
+    } catch (err) {
+      console.error('[Page] Failed to fetch token:', err);
+      throw new Error(`Failed to get HeyGen token: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
   }
 
   // Initialize the avatar session
@@ -26,33 +51,44 @@ export default function Home() {
     if (isInitializing) return;
     try {
       setIsInitializing(true);
-      setError('');
+      setError(null);
+      console.log('[Page] Starting avatar initialization...');
 
       // 1) Get the token
       const token = await fetchHeyGenToken();
-      console.log('[Page] Got heygen token:', token.slice(0, 10) + '...');
 
-      // 2) Start the session with 'Santa_Fireplace_Front_public' in avatarClient.ts
+      // 2) Start the session
+      console.log('[Page] Starting avatar session...');
       await startAvatarSession(token);
 
       // 3) Listen for the media stream
+      console.log('[Page] Setting up stream listener...');
       onStream((stream) => {
+        console.log('[Page] Got media stream, attaching to video...');
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current
             .play()
             .then(() => {
-              console.log('[Page] video playing');
+              console.log('[Page] Video playing successfully');
               setAvatarReady(true);
             })
-            .catch(console.error);
+            .catch((err) => {
+              console.error('[Page] Failed to play video:', err);
+              throw err;
+            });
+        } else {
+          console.error('[Page] No video element reference');
+          throw new Error('Video element not found');
         }
       });
 
-      console.log('[Page] Avatar session started');
+      console.log('[Page] Avatar session initialized successfully');
     } catch (err: any) {
-      console.error('[Page] initializeAvatar error:', err);
-      setError(err.message || 'Avatar initialization failed');
+      const errorMessage = err instanceof Error ? err.message : 'Unknown initialization error';
+      console.error('[Page] Avatar initialization failed:', errorMessage);
+      setError(errorMessage);
+      setAvatarReady(false);
     } finally {
       setIsInitializing(false);
     }
@@ -87,25 +123,39 @@ export default function Home() {
       const userText = transData.transcript;
       console.log('[Page] user text =', userText);
 
-      // 2) GPT
-      console.log('[Page] calling /api/chat...');
+      // 2) GPT with streaming
+      console.log('[Page] calling /api/chat with streaming...');
       const chatRes = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript: userText }),
+        body: JSON.stringify({ transcript: userText, streaming: true }),
       });
+
       if (!chatRes.ok) throw new Error(`/api/chat error: ${chatRes.status}`);
-      const chatData = await chatRes.json();
-      if (chatData.error) throw new Error(`Chat error: ${chatData.error}`);
+      
+      // Handle streaming response
+      const reader = chatRes.body?.getReader();
+      const decoder = new TextDecoder();
+      let gptAnswer = '';
 
-      const gptAnswer = chatData.response;
-      console.log('[Page] GPT says:', gptAnswer);
+      if (reader) {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-      // 3) Let avatar speak it
-      console.log('[Page] speakText -> repeat GPT');
-      await speakText(gptAnswer);
+            const chunk = decoder.decode(value);
+            gptAnswer += chunk;
+            
+            // Process the chunk for the avatar to speak
+            await processStreamedText(chunk);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      }
 
-      // 4) Update transcript
+      // 3) Update transcript
       setTranscript((prev) => prev + `\nYou: ${userText}\nAvatar: ${gptAnswer}`);
     } catch (err) {
       console.error('Error processing audio:', err);
