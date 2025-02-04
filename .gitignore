@@ -41,3 +41,7 @@ next-env.d.ts
 /tmp
 *.temp
 *.tmp
+
+# Python virtual environment
+venv/
+.venv/

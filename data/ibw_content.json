@@ -1,0 +1,25 @@
+{
+  "metadata": {
+    "total_documents": 1,
+    "created_at": "2025-01-30T23:40:21.452Z",
+    "types": [
+      "course_overview"
+    ],
+    "sources": [
+      "staff"
+    ]
+  },
+  "documents": [
+    {
+      "markdown": "# Alexander Sprengel\n\nNatalie Sorg +49 7361 576-2534 +49 7361 576-2312 natalie.sorg@hs-aalen.de WIN 4.09personal Profile → Alexander Sprengel +49 7361 576-6712 +49 7361 576-2312 alexander.sprengel@hs-aalen.de WIN 4.09personal Profile →Office hoursUpon request\n\n\n---\n\n*Source: Hochschule Aalen - International Business Studies Bachelor of Arts*",
+      "metadata": {
+        "source": "staff",
+        "section": "Alexander Sprengel",
+        "type": "course_overview",
+        "url": "https://www.hs-aalen.de/en/courses/22/staff",
+        "title": "Hochschule Aalen - International Business Studies Bachelor of Arts",
+        "timestamp": "2025-01-30T23:40:06.963Z"
+      }
+    }
+  ]
+}

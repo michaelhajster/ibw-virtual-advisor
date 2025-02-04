@@ -1,4 +1,4 @@
-// Environment variable configuration
+// Edge-compatible environment configuration
 const env = {
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
   HEYGEN_API_KEY: process.env.HEYGEN_API_KEY,

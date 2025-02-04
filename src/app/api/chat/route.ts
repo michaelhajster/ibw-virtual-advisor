@@ -1,7 +1,5 @@
-export const runtime = 'edge';
-
 import { NextRequest, NextResponse } from 'next/server';
-import { getAssistantResponse, getStreamingResponse } from '@/lib/openaiAssistant';
+import { ragChat } from '@/lib/ragChat';
 import env from '@/lib/env';
 
 export async function POST(req: NextRequest) {
@@ -19,12 +17,12 @@ export async function POST(req: NextRequest) {
     }
 
     if (streaming) {
-      return getStreamingResponse(transcript);
+      return ragChat.getStreamingResponse(transcript);
     }
 
-    console.log('🤖 [Chat] Getting GPT response for:', transcript);
-    const response = await getAssistantResponse(transcript);
-    console.log('✨ [Chat] GPT response:', response);
+    console.log('🤖 [Chat] Getting RAG response for:', transcript);
+    const response = await ragChat.getChatResponse(transcript);
+    console.log('✨ [Chat] RAG response:', response);
 
     return NextResponse.json({ response });
   } catch (error) {

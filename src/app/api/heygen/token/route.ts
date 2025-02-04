@@ -38,6 +38,18 @@ export async function GET(req: NextRequest) {
       throw new Error(`No token in response. Got: ${JSON.stringify(data)}`);
     }
 
+    // Decode and check token expiration
+    try {
+      const tokenData = JSON.parse(Buffer.from(data.data.token, 'base64').toString());
+      console.log(' [Token API] Decoded token data:', {
+        created_at: new Date(tokenData.created_at * 1000).toISOString(),
+        expires_at: new Date((tokenData.created_at + 300) * 1000).toISOString(), // Tokens usually expire in 5 minutes
+        token_type: tokenData.token_type
+      });
+    } catch (e) {
+      console.warn(' [Token API] Could not decode token for expiration check:', e);
+    }
+
     // Return the token exactly as received from HeyGen
     console.log(' [Token API] Got token:', data.data.token.slice(0, 10) + '...');
     return NextResponse.json({ token: data.data.token });

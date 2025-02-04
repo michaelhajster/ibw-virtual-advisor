@@ -125,6 +125,8 @@ export default function Home() {
 
       // 2) GPT with streaming
       console.log('[Page] calling /api/chat with streaming...');
+      const startTime = Date.now();
+
       const chatRes = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -137,6 +139,7 @@ export default function Home() {
       const reader = chatRes.body?.getReader();
       const decoder = new TextDecoder();
       let gptAnswer = '';
+      let chunkCount = 0;
 
       if (reader) {
         try {
@@ -145,6 +148,7 @@ export default function Home() {
             if (done) break;
 
             const chunk = decoder.decode(value);
+            console.log(` [Stream] Chunk #${++chunkCount} received at +${Date.now() - startTime}ms:`, chunk);
             gptAnswer += chunk;
             
             // Process the chunk for the avatar to speak
@@ -152,6 +156,7 @@ export default function Home() {
           }
         } finally {
           reader.releaseLock();
+          console.log(`✅ [Stream] Complete: ${chunkCount} chunks in ${Date.now() - startTime}ms`);
         }
       }
 
@@ -163,6 +168,14 @@ export default function Home() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // Add handler for ending session
+  const handleEndSession = async () => {
+    await stopAvatarSession();
+    setHasUserInteracted(false);
+    setAvatarReady(false);
+    setTranscript('');
   };
 
   return (
@@ -191,6 +204,12 @@ export default function Home() {
               <p>{transcript}</p>
             </div>
           )}
+          <button
+            onClick={handleEndSession}
+            className="mt-4 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+          >
+            End Session
+          </button>
         </>
       )}
     </main>
