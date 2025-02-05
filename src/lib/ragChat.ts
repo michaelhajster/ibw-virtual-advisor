@@ -13,7 +13,7 @@ export class RagChatService {
   }
 
   private async getContext(question: string): Promise<string> {
-    const res = await fetch('http://localhost:3000/api/vector', {
+    const res = await fetch('http://127.0.0.1:8000/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: question }),
