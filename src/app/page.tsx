@@ -23,23 +23,31 @@ export default function Home() {
   const [transcript, setTranscript] = useState('');
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Fetch the base64 token from our /api/heygen/token route
+  // Fetch token directly from HeyGen API
   async function fetchHeyGenToken() {
     try {
       console.log('[Page] Fetching HeyGen token...');
-      const res = await fetch('/api/heygen/token');
-      const data = await res.json();
+      const myHeaders = new Headers();
+      myHeaders.append("content-type", "application/json");
+      myHeaders.append("X-Api-Key", process.env.NEXT_PUBLIC_HEYGEN_API_KEY || '');
+
+      const response = await fetch("https://api.heygen.com/v1/streaming.create_token", {
+        method: 'POST',
+        headers: myHeaders,
+      });
       
-      if (data.error) {
-        throw new Error(`Token API error: ${data.error}`);
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(`HeyGen API error: ${response.status} ${data.message || ''}`);
       }
       
-      if (!data.token) {
-        throw new Error('No token from /api/heygen/token');
+      if (!data.data?.token) {
+        throw new Error('No token received from HeyGen API');
       }
       
-      console.log('[Page] Got heygen token:', data.token.slice(0, 10) + '...');
-      return data.token;
+      console.log('[Page] Got heygen token:', data.data.token.slice(0, 10) + '...');
+      return data.data.token;
     } catch (err) {
       console.error('[Page] Failed to fetch token:', err);
       throw new Error(`Failed to get HeyGen token: ${err instanceof Error ? err.message : 'Unknown error'}`);
