@@ -2,10 +2,16 @@ import StreamingAvatar from '@heygen/streaming-avatar';
 import { TaskType, StreamingEvents, AvatarQuality, TaskMode } from '@heygen/streaming-avatar';
 
 let avatar: StreamingAvatar | null = null;
-let currentSentence = '';
+let textBuffer = '';
 let speakingPromise: Promise<void> | null = null;
 let processingStartTime: number | null = null;
-let sentenceCount = 0;
+let chunkCount = 0;
+let isProcessing = false;
+
+// Konfiguration für Chunk-Größen
+const MAX_CHUNK_SIZE = 150;
+const MIN_CHUNK_SIZE = 50;
+const MAX_RETRY_ATTEMPTS = 2;
 
 /**
  * Initialize a new avatar session using the official HeyGen Streaming Avatar SDK.
@@ -45,12 +51,12 @@ export async function startAvatarSession(token: string): Promise<void> {
 
     // Start the avatar session
     console.log('[AvatarSDK] Creating avatar with config:', {
-      avatarName: '73c84e2b886940099c5793b085150f2f',
+      avatarName: 'Wayne_20240711',
       quality: AvatarQuality.Low
     });
     
     const sessionInfo = await avatar.createStartAvatar({
-      avatarName: '73c84e2b886940099c5793b085150f2f',
+      avatarName: 'Wayne_20240711',
       quality: AvatarQuality.Low,
     }).catch(err => {
       console.error('[AvatarSDK] Create avatar error details:', {
@@ -64,6 +70,26 @@ export async function startAvatarSession(token: string): Promise<void> {
     });
 
     console.log('[AvatarSDK] Session started. Info:', sessionInfo);
+    
+    // Warm up the HeyGen API with an initial silent call
+    // This helps reduce the latency of the first actual speak call
+    try {
+      console.log('[AvatarSDK] Warming up HeyGen API...');
+      const warmupPromise = avatar.speak({
+        text: "Warm up",  // This text won't be heard by the user
+        taskType: TaskType.REPEAT,
+        taskMode: TaskMode.ASYNC,
+      });
+      
+      // Don't await the warmup - let it run in the background
+      warmupPromise.catch(err => {
+        // Just log any errors, don't interrupt the flow
+        console.warn('[AvatarSDK] Warmup request failed (non-critical):', err);
+      });
+    } catch (err) {
+      // Just log the error, don't interrupt the flow
+      console.warn('[AvatarSDK] Failed to send warmup request (non-critical):', err);
+    }
     
     // Cleanup
     window.removeEventListener('error', handleError);
@@ -102,9 +128,60 @@ export function onStream(callback: (stream: MediaStream) => void) {
 }
 
 /**
- * Process a chunk of streamed text and make the avatar speak complete sentences.
+ * Optimierte Funktion zum Senden von Text an die HeyGen API mit Retry-Logik
  */
-export async function processStreamedText(chunk: string) {
+async function sendSpeakRequest(text: string, chunkNum: number): Promise<void> {
+  if (!avatar) return;
+  
+  let retryCount = 0;
+  let lastError: any = null;
+  
+  while (retryCount <= MAX_RETRY_ATTEMPTS) {
+    try {
+      const speakStart = Date.now();
+      console.log(`🎯 [${speakStart - (processingStartTime || 0)}ms] Calling HeyGen speak API for chunk #${chunkNum} (attempt ${retryCount + 1})`);
+      
+      await avatar.speak({
+        text,
+        taskType: TaskType.REPEAT,
+        taskMode: TaskMode.ASYNC,
+      });
+      
+      const speakEnd = Date.now();
+      console.log(`⏱️ [${speakEnd - (processingStartTime || 0)}ms] HeyGen API call completed:`, {
+        text: text.slice(0, 30) + (text.length > 30 ? '...' : ''),
+        duration: speakEnd - speakStart,
+        chunkNum
+      });
+      
+      // Erfolg - zurückkehren
+      return;
+    } catch (err) {
+      lastError = err;
+      retryCount++;
+      
+      console.warn(`⚠️ [AvatarSDK] Error on attempt ${retryCount}/${MAX_RETRY_ATTEMPTS + 1} for chunk #${chunkNum}:`, err);
+      
+      // Wenn wir das Limit erreicht haben, weitergeben
+      if (retryCount > MAX_RETRY_ATTEMPTS) break;
+      
+      // Exponentielles Backoff - mit jedem Versuch länger warten
+      const backoffTime = 1000 * Math.pow(2, retryCount - 1);
+      console.log(`⏳ [AvatarSDK] Waiting ${backoffTime}ms before retry...`);
+      await new Promise(resolve => setTimeout(resolve, backoffTime));
+    }
+  }
+  
+  // Alle Wiederholungsversuche fehlgeschlagen
+  console.error(`❌ [AvatarSDK] Failed to process chunk #${chunkNum} after ${MAX_RETRY_ATTEMPTS + 1} attempts:`, lastError);
+  // Trotz Fehlern fortfahren
+}
+
+/**
+ * Process a chunk of streamed text in larger batches to reduce API calls.
+ * Prioritizes starting speech quickly for the first chunks.
+ */
+export async function processStreamedText(chunk: string, isLastChunk = false, isPriority = false) {
   if (!avatar) {
     console.warn('[AvatarSDK] processStreamedText called but no avatar session exists');
     return;
@@ -114,7 +191,9 @@ export async function processStreamedText(chunk: string) {
   console.log(`🔍 [Debug] Received chunk:`, {
     size: chunk.length,
     content: chunk.slice(0, 50) + (chunk.length > 50 ? '...' : ''),
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    isLastChunk,
+    isPriority
   });
 
   // Initialize timer on first chunk
@@ -124,66 +203,82 @@ export async function processStreamedText(chunk: string) {
     console.log('⏱️ [0ms] Starting to process first chunk');
   }
 
-  currentSentence += chunk;
+  // Text zum Buffer hinzufügen
+  textBuffer += chunk;
   
-  // Look for sentence boundaries (. ! ?)
-  const sentenceEndRegex = /[.!?]\s+/g;
-  let match;
-  let lastIndex = 0;
-
-  // Process each complete sentence immediately
-  while ((match = sentenceEndRegex.exec(currentSentence)) !== null) {
-    const sentence = currentSentence.slice(lastIndex, match.index + 1).trim();
-    lastIndex = match.index + match[0].length;
-    sentenceCount++;
-
-    // Debug: Log sentence processing
-    console.log(`📝 [Debug] Processing sentence #${sentenceCount}:`, {
-      sentence,
-      length: sentence.length,
-      timeFromStart: Date.now() - processingStartTime
-    });
-
-    // Process this sentence immediately
-    const processSentence = async () => {
-      try {
-        const speakStart = Date.now();
-        console.log(`🎯 [${speakStart - processingStartTime}ms] Calling HeyGen speak API for sentence #${sentenceCount}`);
-        
-        await avatar.speak({
-          text: sentence,
-          taskType: TaskType.REPEAT,
-          taskMode: TaskMode.ASYNC,
-        });
-
-        const speakEnd = Date.now();
-        console.log(`⏱️ [${speakEnd - processingStartTime}ms] HeyGen API call completed:`, {
-          sentence: sentence.slice(0, 30) + (sentence.length > 30 ? '...' : ''),
-          duration: speakEnd - speakStart,
-          sentenceNum: sentenceCount
-        });
-      } catch (err) {
-        console.error(`❌ [AvatarSDK] Error processing sentence #${sentenceCount}:`, err);
-      }
-    };
-
-    // Don't wait for the previous sentence to finish before starting to process the next one
-    if (!speakingPromise) {
-      speakingPromise = processSentence();
-    } else {
-      speakingPromise = speakingPromise.then(processSentence);
-    }
+  // Prozessieren starten, wenn wir genug Text haben oder dies ein Prioritäts-Chunk ist
+  const shouldProcess = isPriority || 
+                       textBuffer.length >= MIN_CHUNK_SIZE || 
+                       (isLastChunk && textBuffer.length > 0);
+  
+  if (shouldProcess && !isProcessing) {
+    // Prozessiere Text in optimierten Chunks
+    await processTextBuffer(isLastChunk);
+  } else if (isLastChunk && textBuffer.length > 0) {
+    // Sicherstellen, dass der letzte Chunk immer verarbeitet wird
+    await processTextBuffer(true);
   }
+}
 
-  // Keep any remaining incomplete sentence
-  currentSentence = currentSentence.slice(lastIndex);
+/**
+ * Hilfsfunktion zum Verarbeiten des Text-Buffers in optimierten Chunks
+ */
+async function processTextBuffer(isLastChunk: boolean): Promise<void> {
+  if (isProcessing || !textBuffer) return;
   
-  // Debug: Log remaining buffer
-  if (currentSentence) {
-    console.log(`💭 [Debug] Remaining buffer:`, {
-      content: currentSentence.slice(0, 50) + (currentSentence.length > 50 ? '...' : ''),
-      length: currentSentence.length
-    });
+  try {
+    isProcessing = true;
+    
+    // Verarbeite im Buffer vorhandenen Text in Chunks von MAX_CHUNK_SIZE
+    while (textBuffer.length > 0) {
+      const chunkSize = Math.min(textBuffer.length, MAX_CHUNK_SIZE);
+      const textToProcess = textBuffer.slice(0, chunkSize);
+      
+      // Buffer aktualisieren
+      textBuffer = textBuffer.slice(chunkSize);
+      chunkCount++;
+      
+      // Debuginformationen
+      console.log(`📝 [Debug] Processing chunk #${chunkCount}:`, {
+        size: textToProcess.length,
+        content: textToProcess.slice(0, 30) + (textToProcess.length > 30 ? '...' : ''),
+        remainingBuffer: textBuffer.length,
+        isLastPiece: isLastChunk && textBuffer.length === 0
+      });
+      
+      // Text an die Speak-Funktion senden
+      const processChunk = async () => {
+        await sendSpeakRequest(textToProcess, chunkCount);
+      };
+      
+      // Chunks sequentiell verarbeiten, aber ohne zu viel Overhead
+      if (!speakingPromise) {
+        speakingPromise = processChunk();
+      } else {
+        speakingPromise = speakingPromise.then(processChunk);
+      }
+      
+      // Wenn noch mehr als genug Text übrig ist, sofort weitermachen
+      // ohne auf die Verarbeitung zu warten
+      if (textBuffer.length >= MAX_CHUNK_SIZE) {
+        continue;
+      }
+      
+      // Wenn wir am Ende sind und nicht genügend Text für einen vollen Chunk haben,
+      // warten wir auf das nächste Textstück, es sei denn, dies ist der letzte Chunk
+      if (textBuffer.length < MIN_CHUNK_SIZE && !isLastChunk) {
+        break;
+      }
+    }
+  } finally {
+    // Wenn dies der letzte Chunk war und wir diesen verarbeitet haben,
+    // setzen wir isProcessing zurück
+    if (isLastChunk && textBuffer.length === 0) {
+      isProcessing = false;
+    } else {
+      // Ansonsten setzen wir isProcessing nur zurück, wenn Buffer leer ist
+      isProcessing = textBuffer.length > 0;
+    }
   }
 }
 
@@ -203,12 +298,7 @@ export async function speakText(text: string) {
   }
 
   // 'repeat' => reads your text verbatim
-  speakingPromise = avatar.speak({
-    text,
-    taskType: TaskType.REPEAT,
-    taskMode: TaskMode.ASYNC,
-  });
-
+  speakingPromise = sendSpeakRequest(text, ++chunkCount);
   await speakingPromise;
 }
 
@@ -225,14 +315,15 @@ export async function stopAvatarSession() {
   }
   
   if (processingStartTime) {
-    console.log(`⏱️ [${Date.now() - processingStartTime}ms] Session ended (${sentenceCount} sentences spoken)`);
+    console.log(`⏱️ [${Date.now() - processingStartTime}ms] Session ended (${chunkCount} chunks spoken)`);
     console.log('🎭 ================================\n');
   }
   
   await avatar.stopAvatar();
   avatar = null;
-  currentSentence = '';
+  textBuffer = '';
   speakingPromise = null;
   processingStartTime = null;
-  sentenceCount = 0;
+  chunkCount = 0;
+  isProcessing = false;
 }

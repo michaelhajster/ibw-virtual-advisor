@@ -19,55 +19,152 @@ The application consists of two main components:
    - No separate server needed
    - Collection: `ibw_collection` (stores program information)
 
-## Setup & Running
+## Setup and Running Instructions
 
-1. **Environment Setup**
+### Prerequisites
+- Node.js and npm (on Mac, install via `brew install node`)
+- Python 3.x (on Mac, install via `brew install python@3.13`)
+- OpenAI API key
+- HeyGen API key
+
+### macOS-Specific Setup
+
+1. Install Homebrew if not already installed:
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+2. Install required system dependencies:
+```bash
+# Install Python and Node.js
+brew install python@3.13 node
+
+# Make sure pip is up to date
+python3 -m pip install --upgrade pip
+```
+
+3. Clone the repository and install Node dependencies:
+```bash
+git clone <repository-url>
+cd ibw-virtual-advisor
+npm install
+```
+
+4. Set up environment variables:
+Create a `.env.local` file in the root directory with:
+```
+OPENAI_API_KEY="your-openai-api-key"
+NEXT_PUBLIC_HEYGEN_API_KEY="your-heygen-api-key"
+```
+
+5. Set up Python environment and dependencies:
+```bash
+# Create and activate virtual environment
+# IMPORTANT: On macOS, always use a virtual environment to avoid system Python issues
+python3 -m venv venv
+source venv/bin/activate
+
+# Install Python dependencies
+pip install fastapi uvicorn chromadb openai
+```
+
+### Running the Application
+
+The application requires two servers to be running simultaneously:
+
+1. Start the ChromaDB server (in a terminal with venv activated):
+```bash
+# Make sure you're in the project root
+cd ibw-virtual-advisor
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Export OpenAI API key from .env.local
+export OPENAI_API_KEY=$(grep OPENAI_API_KEY .env.local | cut -d '=' -f2 | tr -d '"')
+
+# Start the server with correct Python path
+PYTHONPATH=. python3 scripts/persistent_chroma_server.py
+```
+
+2. Start the Next.js development server (in a new terminal):
+```bash
+cd ibw-virtual-advisor
+npm run dev
+```
+
+3. Load the mock content (optional, in a new terminal):
+```bash
+cd ibw-virtual-advisor
+npx ts-node scripts/load_mock_content.ts
+```
+
+### macOS-Specific Troubleshooting
+
+1. **Python Environment Issues**
    ```bash
-   # Install dependencies
-   npm install
-
-   # Create .env.local with required keys
-   OPENAI_API_KEY=your_openai_key
-   HEYGEN_API_KEY=your_heygen_key
+   # If you see "externally-managed-environment" error:
+   # ALWAYS use a virtual environment on macOS
+   python3 -m venv venv
+   source venv/bin/activate
    ```
 
-2. **Starting the Application**
+2. **Port Already in Use**
    ```bash
-   cd ibw-virtual-advisor
-   npm run dev    # Runs on http://localhost:3000
-   ```
-
-3. **Stopping the Application**
-   - Use `Ctrl + C` in the terminal window
-   - Or if needed: `pkill -f "next dev"`
-
-## Troubleshooting
-
-1. **Port Issues**
-   ```bash
-   # Check if port is in use
+   # Check for processes using ports 3000 or 8000
    lsof -i :3000
+   lsof -i :8000
    
-   # Kill process if needed
+   # Kill processes if needed
    kill -9 <PID>
    ```
 
-2. **Clean Restart**
+3. **Python Path Issues**
    ```bash
-   # Kill all Next.js processes
-   pkill -f "next dev"
-   
-   # Clear Next.js cache if needed
-   rm -rf .next
-   
-   # Restart
-   npm run dev
+   # Always run the Python server with PYTHONPATH set
+   PYTHONPATH=. python3 scripts/persistent_chroma_server.py
    ```
 
-3. **HeyGen Avatar**
-   - Free plan has session limits
-   - If 401 errors occur, wait a few minutes before trying again
-   - One session at a time only
+4. **Permission Issues**
+   ```bash
+   # If you see permission errors with pip
+   python3 -m pip install --user <package>
+   ```
+
+5. **Homebrew Issues**
+   ```bash
+   # Update Homebrew and packages
+   brew update
+   brew upgrade
+   ```
+
+The application should now be running at:
+- Frontend: http://localhost:3000
+- ChromaDB Server: http://localhost:8000
+
+### Testing the Setup
+
+1. Open http://localhost:3000 in your browser
+2. Click "Start Conversation" to initialize the avatar
+3. Try asking a question about the IBW program
+
+### Troubleshooting
+
+- If the ChromaDB server fails to start, ensure:
+  - The virtual environment is activated
+  - The OPENAI_API_KEY is properly exported
+  - You're in the project root directory
+  - PYTHONPATH is set correctly
+
+- If the Next.js server fails to start, ensure:
+  - All Node dependencies are installed
+  - The .env.local file exists with proper API keys
+  - Port 3000 is not in use
+
+- If the avatar doesn't initialize:
+  - Check the browser console for errors
+  - Verify your HeyGen API key is valid
+  - Ensure all API endpoints are responding correctly
 
 ## API Endpoints
 

@@ -153,18 +153,30 @@ export default function Home() {
         try {
           while (true) {
             const { done, value } = await reader.read();
-            if (done) break;
+            
+            // If done, we need to process any remaining text in the buffer
+            if (done) {
+              console.log(`✅ [Stream] Complete: ${chunkCount} chunks in ${Date.now() - startTime}ms`);
+              
+              // Process any remaining text as the final chunk
+              await processStreamedText('', true); // Empty chunk with isLastChunk flag
+              break;
+            }
 
             const chunk = decoder.decode(value);
             console.log(` [Stream] Chunk #${++chunkCount} received at +${Date.now() - startTime}ms:`, chunk);
             gptAnswer += chunk;
             
             // Process the chunk for the avatar to speak
-            await processStreamedText(chunk);
+            // Mark the first chunk as high priority for immediate speaking
+            await processStreamedText(
+              chunk, 
+              false, // Not the last chunk
+              chunkCount === 1 // isPriority = true nur für den ersten Chunk
+            );
           }
         } finally {
           reader.releaseLock();
-          console.log(`✅ [Stream] Complete: ${chunkCount} chunks in ${Date.now() - startTime}ms`);
         }
       }
 
