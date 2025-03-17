@@ -114,21 +114,39 @@ export default function AudioCapture({ onAudioChunk, disabled }: AudioCapturePro
   }, []);
 
   return (
-    <div className="flex flex-col items-center gap-4">
+    <div className="flex flex-col items-center">
       <button
         onClick={isRecording ? stopRecording : startRecording}
         disabled={!!error || disabled}
-        className={`px-6 py-3 rounded-full font-semibold text-white transition-colors ${
-          isRecording 
-            ? 'bg-red-500 hover:bg-red-600' 
-            : 'bg-blue-500 hover:bg-blue-600'
-        } disabled:opacity-50 disabled:cursor-not-allowed`}
+        className={`px-4 py-2 rounded-md text-sm font-normal transition-all shadow-sm ${
+          isRecording ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-[#0066CC] hover:bg-[#0071E3] text-white'
+        } disabled:opacity-40 disabled:cursor-not-allowed`}
       >
-        {isRecording ? 'Stop Recording' : 'Start Recording'}
+        <div className="flex items-center gap-2">
+          {isRecording ? (
+            <>
+              <span className="relative flex h-2 w-2">
+                <span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+              </span>
+              <span>Aufnahme beenden</span>
+            </>
+          ) : (
+            <>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+              <span>Frage stellen</span>
+            </>
+          )}
+        </div>
       </button>
 
+      {/* Schlichtere Fehlermeldung */}
       {error && (
-        <p className="text-red-500 text-sm">{error}</p>
+        <div className="mt-2 text-xs text-red-500">
+          {error}
+        </div>
       )}
     </div>
   );

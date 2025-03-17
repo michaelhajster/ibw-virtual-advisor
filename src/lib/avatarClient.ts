@@ -30,10 +30,12 @@ export async function startAvatarSession(token: string): Promise<void> {
     window.addEventListener('error', handleError);
     
     avatar = new StreamingAvatar({ 
-      token,
-      onError: (error: any) => {
-        console.error('[AvatarSDK] SDK Error:', error);
-      }
+      token
+    });
+
+    // Error handling via window event
+    window.addEventListener('error', (event) => {
+      console.error('[AvatarSDK] SDK Error:', event.error);
     });
 
     // Basic event logs
@@ -43,10 +45,6 @@ export async function startAvatarSession(token: string): Promise<void> {
     
     avatar.on(StreamingEvents.STREAM_DISCONNECTED, () => {
       console.warn('[AvatarSDK] Stream disconnected');
-    });
-
-    avatar.on(StreamingEvents.ERROR, (evt: CustomEvent) => {
-      console.error('[AvatarSDK] Stream error event:', evt.detail);
     });
 
     // Start the avatar session
@@ -283,26 +281,6 @@ async function processTextBuffer(isLastChunk: boolean): Promise<void> {
 }
 
 /**
- * Make the avatar speak the GPT text. We use 'repeat' so the avatar won't do its own GPT.
- */
-export async function speakText(text: string) {
-  if (!avatar) {
-    console.warn('[AvatarSDK] speakText called but no avatar session exists');
-    return;
-  }
-  console.log('[AvatarSDK] speak with text:', text);
-
-  // Wait for any previous speaking to finish
-  if (speakingPromise) {
-    await speakingPromise;
-  }
-
-  // 'repeat' => reads your text verbatim
-  speakingPromise = sendSpeakRequest(text, ++chunkCount);
-  await speakingPromise;
-}
-
-/**
  * Stop the avatar session if you want to clean up.
  */
 export async function stopAvatarSession() {
@@ -326,4 +304,58 @@ export async function stopAvatarSession() {
   processingStartTime = null;
   chunkCount = 0;
   isProcessing = false;
+}
+
+/**
+ * Interrupt the current speech without ending the avatar session.
+ * This allows the user to ask a new question immediately without waiting for the current answer to finish.
+ */
+export async function interruptCurrentSpeech() {
+  if (!avatar) return;
+  
+  console.log('[AvatarSDK] Interrupting current speech...');
+  
+  try {
+    // Clear the text buffer and stop processing
+    textBuffer = '';
+    isProcessing = false;
+    
+    // Use the interrupt() method instead of stopAvatar() to properly interrupt speech without ending the session
+    await avatar.interrupt();
+    
+    // Reset the speaking promise so we're ready for new input
+    speakingPromise = Promise.resolve();
+    
+    console.log('[AvatarSDK] Speech interrupted, ready for new input');
+    
+    // Log the interruption in our timing log
+    if (processingStartTime) {
+      console.log(`⏱️ [${Date.now() - processingStartTime}ms] Speech interrupted after ${chunkCount} chunks`);
+    }
+    
+    // Note: We don't reset processingStartTime or chunkCount
+    // because we want to maintain the session for statistics
+  } catch (error) {
+    console.error('[AvatarSDK] Error interrupting speech:', error);
+  }
+}
+
+/**
+ * Make the avatar speak the GPT text. We use 'repeat' so the avatar won't do its own GPT.
+ */
+export async function speakText(text: string) {
+  if (!avatar) {
+    console.warn('[AvatarSDK] speakText called but no avatar session exists');
+    return;
+  }
+  console.log('[AvatarSDK] speak with text:', text);
+
+  // Wait for any previous speaking to finish
+  if (speakingPromise) {
+    await speakingPromise;
+  }
+
+  // 'repeat' => reads your text verbatim
+  speakingPromise = sendSpeakRequest(text, ++chunkCount);
+  await speakingPromise;
 }

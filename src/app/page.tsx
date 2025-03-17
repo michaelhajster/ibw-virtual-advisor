@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import AudioCapture from '@/components/AudioCapture';
-import { startAvatarSession, onStream, speakText, stopAvatarSession, processStreamedText } from '@/lib/avatarClient';
+import { startAvatarSession, onStream, speakText, stopAvatarSession, processStreamedText, interruptCurrentSpeech } from '@/lib/avatarClient';
+import WelcomeScreen from '@/components/WelcomeScreen';
+import VideoSection from '@/components/VideoSection';
+import ChatMessages from '@/components/ChatMessages';
 
 // Add global error handler
 if (typeof window !== 'undefined') {
@@ -20,6 +23,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false); // New state to track if avatar is speaking
   const [transcript, setTranscript] = useState('');
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -151,6 +155,7 @@ export default function Home() {
 
       if (reader) {
         try {
+          setIsSpeaking(true); // Set speaking state to true when streaming starts
           while (true) {
             const { done, value } = await reader.read();
             
@@ -177,6 +182,7 @@ export default function Home() {
           }
         } finally {
           reader.releaseLock();
+          setIsSpeaking(false); // Reset speaking state when streaming is done
         }
       }
 
@@ -198,39 +204,79 @@ export default function Home() {
     setTranscript('');
   };
 
+  // New handler for interrupting current speech
+  const handleInterrupt = async () => {
+    await interruptCurrentSpeech();
+    setIsSpeaking(false);
+    setIsProcessing(false);
+    console.log('[Page] Speech interrupted, ready for new question');
+  };
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24">
+    <main className="min-h-screen flex flex-col p-4 sm:p-6 md:p-8 bg-gray-50">
+      {/* Inhalt */}
       {!hasUserInteracted ? (
-        <button
-          onClick={() => setHasUserInteracted(true)}
-          className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-        >
-          Start Conversation
-        </button>
+        <WelcomeScreen onStart={() => setHasUserInteracted(true)} />
       ) : (
-        <>
-          <div className="relative">
-            {isInitializing && <div>Initializing avatar...</div>}
-            {error && <div className="text-red-500">{error}</div>}
-            <video
-              ref={videoRef}
-              style={{ width: '100%', maxWidth: '800px' }}
-              playsInline
-            />
-          </div>
-          {avatarReady && <AudioCapture onAudioChunk={handleAudioChunk} disabled={isProcessing} />}
-          {transcript && (
-            <div className="mt-4 p-4 bg-gray-100 rounded-lg">
-              <p>{transcript}</p>
+        <div className="w-full max-w-7xl mx-auto h-full">
+          <div className="flex flex-col lg:flex-row gap-6">
+            {/* Linke Seite: Video und Controls */}
+            <div className="lg:w-2/3 flex flex-col gap-4">
+              {/* Video Area */}
+              <VideoSection 
+                videoRef={videoRef}
+                isInitializing={isInitializing}
+                isSpeaking={isSpeaking}
+                error={error}
+              />
+              
+              {/* Controls Panel */}
+              <div className="bg-white rounded-lg border border-gray-200 p-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  {isSpeaking && (
+                    <button 
+                      onClick={handleInterrupt}
+                      className="px-3 py-1.5 rounded bg-amber-500 text-white text-sm"
+                    >
+                      Unterbrechen
+                    </button>
+                  )}
+                  
+                  {avatarReady && (
+                    <AudioCapture 
+                      onAudioChunk={handleAudioChunk} 
+                      disabled={isProcessing} 
+                    />
+                  )}
+                  
+                  <button
+                    onClick={handleEndSession}
+                    className="px-3 py-1.5 rounded bg-gray-100 text-gray-700 text-sm"
+                  >
+                    Gespräch beenden
+                  </button>
+                </div>
+              </div>
             </div>
-          )}
-          <button
-            onClick={handleEndSession}
-            className="mt-4 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
-          >
-            End Session
-          </button>
-        </>
+            
+            {/* Rechte Seite: Transkript/Chat */}
+            <div className="lg:w-1/3 bg-white rounded-lg border border-gray-200 p-4 lg:h-[600px] flex flex-col">
+              <h2 className="text-sm font-medium text-gray-600 mb-3">
+                Gesprächsverlauf
+              </h2>
+              
+              {transcript ? (
+                <div className="flex-1 overflow-y-auto pr-2 conversation-container">
+                  <ChatMessages transcript={transcript} />
+                </div>
+              ) : (
+                <div className="flex-1 flex items-center justify-center">
+                  <p className="text-gray-400 text-xs">Ihr Gesprächsverlauf erscheint hier...</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );

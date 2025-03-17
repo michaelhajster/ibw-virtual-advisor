@@ -3,19 +3,50 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Schlichtere Farbpalette */
+  --background: #F5F5F7;
+  --surface: #FFFFFF;
+  --primary: #0066CC;
+  --danger: #FF3B30;
+  --warning: #FF9500;
+  --text-primary: #333333;
+  --text-secondary: #666666;
+  --border: #E5E5E5;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900;
+    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+/* Minimaler Scrollbar-Style */
+.conversation-container {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.1) transparent;
+}
+
+.conversation-container::-webkit-scrollbar {
+  width: 4px;
+}
+
+.conversation-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.conversation-container::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.1);
+  border-radius: 20px;
+}
+
+/* Einfache Chat-Bubbles */
+.chat-bubble-user {
+  @apply bg-blue-500 text-white rounded-lg rounded-br-none px-3 py-2 max-w-[85%];
+}
+
+.chat-bubble-avatar {
+  @apply bg-gray-100 text-gray-800 rounded-lg rounded-bl-none px-3 py-2 max-w-[85%];
 }
